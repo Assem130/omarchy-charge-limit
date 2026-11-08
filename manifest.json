@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "assem.charge-limit",
+  "name": "Charge Limit",
+  "version": "1.0.0",
+  "author": "Assem130",
+  "license": "MIT",
+  "description": "Cap battery charging on ASUS laptops through asusctl (60/80/100% or custom) to preserve battery health.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Charge Limit",
+    "description": "Shows the active battery charge limit; click to change it.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "schema": [
+      {
+        "key": "showLimit",
+        "type": "boolean",
+        "label": "Show limit next to the icon",
+        "description": "Display the active limit (e.g. 80) beside the icon while it is below 100%.",
+        "defaultValue": true
+      }
+    ]
+  }
+}

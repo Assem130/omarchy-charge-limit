@@ -1,0 +1,86 @@
+#!/bin/bash
+# Battery charge limit helper for the assem.charge-limit Omarchy plugin.
+# The limit is read and set only through asusctl; asusd saves it in
+# /etc/asusd/asusd.ron and restores it at boot and after waking from sleep.
+#
+#   charge-limit status        key<TAB>value lines for the bar widget
+#   charge-limit set <20-100>  asusctl battery limit <value>
+#   charge-limit setup         install asusctl and start asusd (password prompt)
+#   charge-limit uninstall     asusctl battery limit 100
+
+set -u
+
+MIN=20
+MAX=100
+
+battery_dir() {
+  local d
+  for d in /sys/class/power_supply/BAT*; do
+    [[ -d $d ]] && { echo "$d"; return 0; }
+  done
+  return 1
+}
+
+read_int() { local v; v=$(tr -dc '0-9' <"$1" 2>/dev/null); echo "${v:-}"; }
+
+valid_limit() { [[ $1 =~ ^[0-9]{1,3}$ ]] && ((10#$1 >= MIN && 10#$1 <= MAX)); }
+
+have_asusctl() { command -v asusctl >/dev/null 2>&1 && systemctl is-active --quiet asusd.service; }
+
+# "Current battery charge limit: 80%" -> 80
+asusctl_limit() {
+  asusctl battery info 2>/dev/null | sed -n 's/.*charge limit: *\([0-9]\{1,3\}\)%.*/\1/p' | head -n1
+}
+
+cmd_status() {
+  local bat limit="" installed=no supported=no
+  bat=$(battery_dir) || { printf 'present\tno\n'; return 0; }
+  printf 'present\tyes\n'
+  if have_asusctl; then
+    installed=yes
+    limit=$(asusctl_limit)
+    [[ -n $limit ]] && supported=yes
+  else
+    # Before setup, show whether the laptop can take a limit at all.
+    [[ -f $bat/charge_control_end_threshold ]] && supported=yes
+  fi
+
+  # Charge, health and cycles are battery readings asusctl does not report.
+  local full design health="" cycles
+  full=$(read_int "$bat/energy_full"); design=$(read_int "$bat/energy_full_design")
+  if [[ -z $full || -z $design ]]; then
+    full=$(read_int "$bat/charge_full"); design=$(read_int "$bat/charge_full_design")
+  fi
+  [[ -n $full && -n $design && $design -gt 0 ]] && health=$((full * 100 / design))
+  cycles=$(read_int "$bat/cycle_count")
+  [[ $cycles == 0 ]] && cycles=""
+
+  printf 'supported\t%s\n' "$supported"
+  printf 'limit\t%s\n' "$limit"
+  printf 'installed\t%s\n' "$installed"
+  printf 'writable\t%s\n' "$installed"
+  printf 'capacity\t%s\n' "$(read_int "$bat/capacity")"
+  printf 'status\t%s\n' "$(head -c 40 "$bat/status" 2>/dev/null | tr -d '\n\t')"
+  printf 'health\t%s\n' "$health"
+  printf 'cycles\t%s\n' "$cycles"
+}
+
+cmd_set() {
+  local value=${1:-}
+  valid_limit "$value" || { echo "Limit must be a whole number from $MIN to $MAX." >&2; return 2; }
+  have_asusctl || { echo "asusctl is not set up yet. Run: $0 setup" >&2; return 3; }
+  asusctl battery limit "$((10#$value))"
+}
+
+cmd_setup() {
+  # pkexec shows Omarchy's graphical password prompt, so this works from the bar.
+  pkexec /bin/sh -c 'pacman -S --needed --noconfirm asusctl && systemctl start asusd.service'
+}
+
+case ${1:-status} in
+  status) cmd_status ;;
+  set) cmd_set "${2:-}" ;;
+  setup) cmd_setup ;;
+  uninstall) have_asusctl && asusctl battery limit 100 ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
