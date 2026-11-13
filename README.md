@@ -22,8 +22,11 @@ See [SECURITY.md](SECURITY.md) for exactly what the plugin runs.
   `/etc/asusd/asusd.ron` and restores it at boot and after waking from sleep.
 - Without asusctl, the panel offers **Install asusctl** (one password prompt).
 - Charge, health and cycle count are read from the kernel's battery info, since asusctl doesn't report them.
+- **Power profile** rows pick the profile for *On charger* and *On battery*. Omarchy already switches
+  profiles when you plug in or unplug; the panel only shows and changes those saved choices, through
+  `omarchy-powerprofiles-set`. A row for the source you are not on takes effect at the next plug or unplug.
 
-CLI: `bin/charge-limit status | set <20-100> | setup | uninstall`.
+CLI: `bin/charge-limit status | set <50-100> | setup | uninstall | profiles | profile <ac|battery> <profile>`.
 
 ## Remove
 

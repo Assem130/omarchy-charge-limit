@@ -23,5 +23,15 @@
   "charge": "Charge",
   "persist": "Persistent",
   "yes": "Yes",
-  "no": "No"
+  "no": "No",
+  "profiles": "Power profile",
+  "profiles.ac": "On charger",
+  "profiles.battery": "On battery",
+  "profile.power-saver": "Saver",
+  "profile.balanced": "Balanced",
+  "profile.performance": "Performance",
+  "profiles.hint": "Omarchy switches to these when you plug in or unplug.",
+  "profile.failed": "Could not change the power profile.",
+  "profiles.nowAc": "On the charger now.",
+  "profiles.nowBattery": "On battery now."
 }

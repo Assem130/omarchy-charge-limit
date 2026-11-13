@@ -4,13 +4,19 @@
 # /etc/asusd/asusd.ron and restores it at boot and after waking from sleep.
 #
 #   charge-limit status        key<TAB>value lines for the bar widget
-#   charge-limit set <20-100>  asusctl battery limit <value>
+#   charge-limit set <50-100>  asusctl battery limit <value>
 #   charge-limit setup         install asusctl and start asusd (password prompt)
 #   charge-limit uninstall     asusctl battery limit 100
+#   charge-limit profiles      power profile choices for charger and battery
+#   charge-limit profile <ac|battery> <power-saver|balanced|performance>
+#
+# Power profiles: Omarchy already switches profiles when you plug in or unplug,
+# remembering one profile per source. These commands only read and save those
+# choices, so there is still a single switcher (omarchy-powerprofiles-set).
 
 set -u
 
-MIN=20
+MIN=50
 MAX=100
 
 battery_dir() {
@@ -77,10 +83,62 @@ cmd_setup() {
   pkexec /bin/sh -c 'pacman -S --needed --noconfirm asusctl && systemctl start asusd.service'
 }
 
+profile_state_dir() { echo "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/powerprofiles"; }
+
+# The same signal Omarchy's battery service and omarchy-powerprofiles-set use.
+power_source() {
+  if [[ $(busctl get-property org.freedesktop.UPower /org/freedesktop/UPower org.freedesktop.UPower OnBattery 2>/dev/null) == "b true" ]]; then
+    echo battery
+  else
+    echo ac
+  fi
+}
+
+# Saved choice for a source, with omarchy-powerprofiles-set's fallback when
+# none is saved: performance on the charger if available, otherwise balanced.
+saved_profile() {
+  local source=$1 available=$2 profile="" file
+  file="$(profile_state_dir)/$source"
+  [[ -r $file ]] && profile=$(head -c 20 "$file" | tr -dc 'a-z-')
+  if [[ -z $profile || " $available " != *" $profile "* ]]; then
+    if [[ $source == ac && " $available " == *" performance "* ]]; then profile=performance; else profile=balanced; fi
+  fi
+  echo "$profile"
+}
+
+cmd_profiles() {
+  local available
+  available=$(omarchy-powerprofiles-list 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+  printf 'available\t%s\n' "$available"
+  [[ -n $available ]] || return 0
+  printf 'source\t%s\n' "$(power_source)"
+  printf 'ac\t%s\n' "$(saved_profile ac "$available")"
+  printf 'battery\t%s\n' "$(saved_profile battery "$available")"
+}
+
+cmd_profile() {
+  local source=${1:-} profile=${2:-} available
+  [[ $source == ac || $source == battery ]] || { echo "Source must be ac or battery." >&2; return 2; }
+  available=" $(omarchy-powerprofiles-list 2>/dev/null | tr '\n' ' ') "
+  [[ $profile =~ ^[a-z-]+$ && $available == *" $profile "* ]] || { echo "Power profile is not available: $profile" >&2; return 2; }
+
+  if [[ $source == "$(power_source)" ]]; then
+    # In effect now: Omarchy switches to it and remembers it for this source.
+    omarchy-powerprofiles-set "$source" "$profile"
+  else
+    # Not in effect now: save it where Omarchy looks on the next plug or unplug.
+    local dir
+    dir=$(profile_state_dir)
+    mkdir -p "$dir" && printf '%s\n' "$profile" >"$dir/$source"
+  fi
+}
+
 case ${1:-status} in
   status) cmd_status ;;
   set) cmd_set "${2:-}" ;;
+  profiles) cmd_profiles ;;
+  profile) cmd_profile "${2:-}" "${3:-}" ;;
   setup) cmd_setup ;;
   uninstall) have_asusctl && asusctl battery limit 100 ;;
-  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

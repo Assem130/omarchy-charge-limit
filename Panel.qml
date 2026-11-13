@@ -1,14 +1,14 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import Quickshell.Services.UPower
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 
 // Charge Limit bar widget: a leaf icon with the active limit, and a panel to
-// pick 60/80/100% or a custom value. All reading and writing goes through
-// bin/charge-limit; the persistence (boot + resume) lives in the system
-// service that `charge-limit setup` installs.
+// pick 60/80/100% or a custom value (50-100%). All reading and writing goes
+// through bin/charge-limit; asusd keeps the limit across boot and resume.
 Panel {
   id: root
   moduleName: "assem.charge-limit"
@@ -33,6 +33,15 @@ Panel {
   readonly property int limit: parseInt(info.limit, 10) || 100
   readonly property int capacity: parseInt(info.capacity, 10) || 0
   readonly property bool busy: setProc.running || setupProc.running
+
+  // Power profile per source. Omarchy does the switching on plug/unplug; this
+  // panel only shows and saves its per-source choices (bin/charge-limit profile).
+  property var profileInfo: ({})
+  readonly property var profileSources: ["ac", "battery"]
+  readonly property var availableProfiles: String(profileInfo.available || "").split(" ").filter(function(p) {
+    return p === "power-saver" || p === "balanced" || p === "performance"
+  })
+  readonly property bool profileBusy: profileSetProc.running
   readonly property bool showLimit: setting("showLimit", true) !== false
 
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
@@ -66,7 +75,26 @@ Panel {
     }
     if (Object.keys(next).length === 0) return
     info = next
-    if (!sliderDragging) customValue = parseInt(next.limit, 10) || 80
+    if (!sliderDragging) customValue = Math.max(50, Math.min(100, parseInt(next.limit, 10) || 80))
+  }
+
+  function refreshProfiles() { if (!profilesProc.running) profilesProc.running = true }
+
+  function parseProfiles(raw) {
+    var next = {}
+    var lines = String(raw || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      var tab = lines[i].indexOf("\t")
+      if (tab > 0) next[lines[i].slice(0, tab)] = lines[i].slice(tab + 1).trim().slice(0, 60)
+    }
+    profileInfo = next
+  }
+
+  function setProfile(source, profile) {
+    if (profileBusy || profileInfo[source] === profile) return
+    error = ""
+    profileSetProc.command = [helper, "profile", source, profile]
+    profileSetProc.running = true
   }
 
   function setLimit(value) {
@@ -90,6 +118,7 @@ Panel {
   onOpenedChanged: {
     if (!opened) return
     refresh()
+    refreshProfiles()
     cursorActive = false
     for (var i = 0; i < presets.length; i++) if (presets[i].value === limit) presetIndex = i
   }
@@ -119,8 +148,32 @@ Panel {
     }
   }
 
+  Process {
+    id: profilesProc
+    command: [root.helper, "profiles"]
+    stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.parseProfiles(text) }
+  }
+
+  Process {
+    id: profileSetProc
+    onExited: function(code) {
+      if (code !== 0) root.error = strings.t("profile.failed")
+      root.refreshProfiles()
+    }
+  }
+
+  // Plugging in or unplugging changes which row is in effect.
+  Connections {
+    target: UPower
+    function onOnBatteryChanged() { if (root.opened) root.refreshProfiles() }
+  }
+
   // Slow background poll keeps the bar number honest; faster while open.
-  Timer { interval: root.opened ? 5000 : 60000; running: true; repeat: true; onTriggered: root.refresh() }
+  // Profiles are read only while open: listing them starts a Python tool.
+  Timer {
+    interval: root.opened ? 5000 : 60000; running: true; repeat: true
+    onTriggered: { root.refresh(); if (root.opened) root.refreshProfiles() }
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -362,6 +415,82 @@ Panel {
               opacity: enabled ? 1 : 0.4
               onClicked: root.setLimit(root.customValue)
             }
+          }
+        }
+
+        // ---------- Power profile per source ----------
+        Column {
+          visible: root.availableProfiles.length > 0
+          width: parent.width
+          spacing: Style.space(10)
+
+          PanelSeparator { foreground: root.bar.foreground }
+
+          PanelSectionHeader {
+            text: strings.t("profiles")
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+          }
+
+          // Both row labels share the width of the longer one, in bold.
+          TextMetrics {
+            id: profileLabelMetrics
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+            text: strings.t("profiles.ac").length >= strings.t("profiles.battery").length
+              ? strings.t("profiles.ac") : strings.t("profiles.battery")
+          }
+
+          Repeater {
+            model: root.profileSources
+
+            Row {
+              id: profileRow
+              required property string modelData
+              readonly property string source: modelData
+              readonly property real labelWidth: Math.ceil(profileLabelMetrics.advanceWidth) + Style.space(6)
+              readonly property real cellWidth: (width - labelWidth - spacing * root.availableProfiles.length) / Math.max(1, root.availableProfiles.length)
+              width: parent.width
+              spacing: Style.space(6)
+
+              PlainText {
+                width: profileRow.labelWidth
+                anchors.verticalCenter: parent.verticalCenter
+                font.pixelSize: Style.font.bodySmall
+                opacity: root.profileInfo.source === profileRow.source ? 1 : 0.6
+                font.bold: root.profileInfo.source === profileRow.source
+                elide: Text.ElideRight
+                text: strings.t("profiles." + profileRow.source)
+              }
+
+              Repeater {
+                model: root.availableProfiles
+                Button {
+                  required property string modelData
+                  width: profileRow.cellWidth
+                  text: strings.t("profile." + modelData)
+                  fontSize: Style.font.bodySmall
+                  foreground: root.bar.foreground
+                  fontFamily: root.bar.fontFamily
+                  verticalPadding: Style.spacing.controlPaddingY
+                  bordered: true
+                  active: root.profileInfo[profileRow.source] === modelData
+                  enabled: !root.profileBusy
+                  onClicked: root.setProfile(profileRow.source, modelData)
+                }
+              }
+            }
+          }
+
+          PlainText {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            opacity: 0.6
+            font.pixelSize: Style.font.caption
+            text: (root.profileInfo.source === "battery" ? strings.t("profiles.nowBattery") + " "
+                   : root.profileInfo.source === "ac" ? strings.t("profiles.nowAc") + " " : "")
+                  + strings.t("profiles.hint")
           }
         }
 
