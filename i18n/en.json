@@ -24,14 +24,20 @@
   "persist": "Persistent",
   "yes": "Yes",
   "no": "No",
-  "profiles": "Power profile",
+  "profiles": "Power and fans",
   "profiles.ac": "On charger",
   "profiles.battery": "On battery",
   "profile.power-saver": "Saver",
   "profile.balanced": "Balanced",
   "profile.performance": "Performance",
-  "profiles.hint": "Omarchy switches to these when you plug in or unplug.",
+  "profiles.hint": "Omarchy switches to these when you plug in or unplug. Each profile also sets the fan mode.",
   "profile.failed": "Could not change the power profile.",
   "profiles.nowAc": "On the charger now.",
-  "profiles.nowBattery": "On battery now."
+  "profiles.nowBattery": "On battery now.",
+  "fan": "Fans",
+  "fan.quiet": "Quiet",
+  "fan.low-power": "Low power",
+  "fan.balanced": "Balanced",
+  "fan.performance": "Performance",
+  "fan.rpm": "%1 RPM"
 }

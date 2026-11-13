@@ -44,6 +44,16 @@ Panel {
   readonly property bool profileBusy: profileSetProc.running
   readonly property bool showLimit: setting("showLimit", true) !== false
 
+  // Firmware fan mode, set by the power profile; read here, never written.
+  readonly property string fanMode: String(info.fan_mode || "")
+  function fanText() {
+    var mode = fanMode === "" ? "" : strings.t("fan." + fanMode)
+    if (mode === "fan." + fanMode) mode = fanMode.charAt(0).toUpperCase() + fanMode.slice(1)
+    var rpm = parseInt(info.fan_rpm, 10)
+    var speed = rpm > 0 ? strings.t("fan.rpm").arg(num(rpm)) : ""
+    return [mode, speed].filter(function(x) { return x !== "" }).join(" · ")
+  }
+
   Commons.Translations { id: strings; directory: Qt.resolvedUrl("i18n") }
 
   function num(v) { return Commons.I18n.formatNumber(v) }
@@ -481,6 +491,12 @@ Panel {
                 }
               }
             }
+          }
+
+          InfoPair {
+            visible: root.fanMode !== ""
+            label: strings.t("fan")
+            value: root.fanText()
           }
 
           PlainText {
